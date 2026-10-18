@@ -67,7 +67,7 @@ on Hugging Face has 500, with different gold SQL for two of the shared questions
 
 Several of BIRD's column description files have a trailing comma in the header row. A normal CSV
 reader then drops the value notes, which are the part the agent needs most, for example that
-`POPLATEK MESICNE` means a monthly statement. `data.py` keeps them, and a test checks it.
+`POPLATEK MESICNE` means monthly issuance. `data.py` keeps them, and a test checks it.
 
 ## Design choices
 
