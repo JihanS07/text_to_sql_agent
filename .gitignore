@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Secrets
+.env
+
+# Benchmark data (3+ GB, downloaded by scripts/download_data.sh)
+data/
+
+# Raw run output and Inspect logs (summaries are committed under results/)
+runs/
+logs/
+
+.DS_Store
+
+# Local assistant config
+CLAUDE.md
