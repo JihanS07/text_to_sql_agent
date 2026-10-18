@@ -1,4 +1,6 @@
-# text-to-sql-agent
+# text_to_sql_agent
+
+[![CI](https://github.com/JihanS07/text_to_sql_agent/actions/workflows/ci.yml/badge.svg)](https://github.com/JihanS07/text_to_sql_agent/actions/workflows/ci.yml)
 
 A tool-using agent that answers plain-English questions about a SQL database, written directly on
 the Claude Messages API with no agent framework, and an evaluation harness that measures it on the
