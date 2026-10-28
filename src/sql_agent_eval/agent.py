@@ -59,6 +59,8 @@ class AgentConfig:
     max_output_tokens: int = 2048
     token_budget: int = 400_000
     allowed_tools: list[str] | None = None
+    system: str = AGENT_SYSTEM
+    extra_tools: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -93,6 +95,7 @@ def run_agent(
 ) -> AgentResult:
     cfg = config or AgentConfig()
     tools = [t for t in TOOL_SPECS if cfg.allowed_tools is None or t["name"] in cfg.allowed_tools]
+    tools += cfg.extra_tools
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_prompt(question, evidence)}]
     usage = Usage()
     trace: list[TraceStep] = []
@@ -103,7 +106,7 @@ def run_agent(
 
     for step in range(1, cfg.max_steps + 1):
         try:
-            turn = model.complete(AGENT_SYSTEM, messages, tools=tools, max_tokens=cfg.max_output_tokens)
+            turn = model.complete(cfg.system, messages, tools=tools, max_tokens=cfg.max_output_tokens)
         except Exception as e:
             return finish(_fallback(toolbox), "model_error", step, f"{type(e).__name__}: {e}")
         usage.add(turn.usage)
@@ -117,6 +120,9 @@ def run_agent(
             if call.name == "submit_answer":
                 trace.append(TraceStep("submit_answer", tool_input_preview(call.input), "", False))
                 return finish(str(call.input.get("sql", "")).strip() or None, "submitted", step)
+            if call.name == "abstain":
+                trace.append(TraceStep("abstain", tool_input_preview(call.input), "", False))
+                return finish(None, "abstained", step)
             output, is_error = toolbox.call(call.name, call.input)
             trace.append(TraceStep(call.name, tool_input_preview(call.input), output[:500], is_error))
             results.append(

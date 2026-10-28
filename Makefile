@@ -1,4 +1,4 @@
-.PHONY: install data check test oracle smoke ablation report
+.PHONY: install data check test oracle smoke ablation report ehrsql-data ehrsql-baselines ehrsql-smoke ehrsql
 
 install:            ## install everything, including dev tools and git hooks
 	uv sync --all-extras
@@ -27,3 +27,20 @@ ablation:           ## every strategy on the same 100 questions
 
 report:
 	uv run sqlagent report --out results/summary.md --readme
+
+ehrsql-data:        ## download EHRSQL 2024 and the MIMIC-IV demo database (37 MB)
+	bash scripts/download_ehrsql.sh
+
+ehrsql-baselines:   ## oracle and always-abstain on both splits, no API key needed
+	for split in valid test; do \
+		uv run sqlagent ehrsql-run --strategy oracle --split $$split || exit 1; \
+		uv run sqlagent ehrsql-run --strategy abstain_all --split $$split || exit 1; \
+	done
+
+ehrsql-smoke:       ## agent with abstain on 20 validation questions
+	uv run sqlagent ehrsql-run --strategy agent_abstain --limit 20
+
+ehrsql:             ## both agents on the same 200 validation questions
+	uv run sqlagent ehrsql-run --strategy agent --limit 200
+	uv run sqlagent ehrsql-run --strategy agent_abstain --limit 200
+	uv run sqlagent ehrsql-report --readme

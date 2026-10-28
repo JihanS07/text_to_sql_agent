@@ -125,11 +125,33 @@ TOOL_SPECS: list[dict[str, Any]] = [
 ]
 
 
+ABSTAIN_SPEC: dict[str, Any] = {
+    "name": "abstain",
+    "description": (
+        "Decline to answer. Use this when the database cannot answer the question: it asks for "
+        "information the tables do not hold, it is not about the data at all, or it is too ambiguous "
+        "to turn into one query. A wrong answer costs far more than declining."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {"reason": {"type": "string", "description": "One sentence on why."}},
+        "required": ["reason"],
+    },
+}
+
+
 class ToolBox:
-    def __init__(self, db: Database, db_id: str, data_dir: Path = DEFAULT_DATA_DIR) -> None:
+    def __init__(
+        self,
+        db: Database,
+        db_id: str,
+        data_dir: Path = DEFAULT_DATA_DIR,
+        rewrite: Callable[[str], str] | None = None,
+    ) -> None:
         self.db = db
         self.db_id = db_id
         self.data_dir = data_dir
+        self.rewrite = rewrite
         self.executed_sql: list[str] = []
         self._handlers: dict[str, Callable[[dict[str, Any]], str]] = {
             "list_tables": lambda _: "\n".join(self.db.table_names()),
@@ -140,7 +162,8 @@ class ToolBox:
 
     def _run_sql(self, args: dict[str, Any]) -> str:
         sql = args["sql"]
-        result = self.db.execute(sql, max_rows=MAX_PREVIEW_ROWS, timeout_s=15)
+        runnable = self.rewrite(sql) if self.rewrite else sql
+        result = self.db.execute(runnable, max_rows=MAX_PREVIEW_ROWS, timeout_s=15)
         self.executed_sql.append(sql)
         return format_result(result)
 

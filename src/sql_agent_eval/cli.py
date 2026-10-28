@@ -11,6 +11,8 @@ from rich.console import Console
 from rich.table import Table
 
 from .data import DEFAULT_DATA_DIR, DEFAULT_QUESTIONS
+from .ehr_runner import EHR_STRATEGIES, ehr_markdown_table, run_ehr_eval, summarize_ehr
+from .ehrsql import DEFAULT_EHR_DIR
 from .report import compare as compare_runs
 from .report import load_run, markdown_table, summarize
 from .runner import run_eval
@@ -161,6 +163,51 @@ def show(run_dir: Path, question_id: int) -> None:
     if row is None:
         raise typer.BadParameter(f"question {question_id} not in run")
     console.print_json(json.dumps(row, default=str))
+
+
+@app.command("ehrsql-run", help="Run one strategy on EHRSQL 2024 (MIMIC-IV demo) and score it.")
+def ehrsql_run(
+    strategy: Annotated[
+        str, typer.Option(help="oracle, abstain_all, agent or agent_abstain.")
+    ] = "agent_abstain",
+    model: Annotated[str, typer.Option(help="Claude model ID.")] = "claude-haiku-5-5",
+    split: Annotated[str, typer.Option(help="valid or test.")] = "valid",
+    limit: Annotated[int | None, typer.Option(help="Number of questions (seeded sample).")] = None,
+    seed: int = 0,
+    concurrency: int = 8,
+    data_dir: Path = DEFAULT_EHR_DIR,
+) -> None:
+    _load_dotenv()
+    if strategy not in EHR_STRATEGIES:
+        raise typer.BadParameter(f"unknown strategy {strategy!r}")
+    out = run_ehr_eval(
+        strategy, model, split=split, limit=limit, seed=seed, concurrency=concurrency, data_dir=data_dir
+    )
+    console.print(ehr_markdown_table([summarize_ehr(out)]))
+    console.print(f"\nResults in {out}")
+
+
+@app.command("ehrsql-report", help="Summary table across EHRSQL runs.")
+def ehrsql_report(
+    runs: Annotated[
+        list[Path] | None, typer.Argument(help="Run directories. Default: all ehrsql runs.")
+    ] = None,
+    readme: Annotated[
+        bool, typer.Option(help="Replace the table between the README's ehrsql markers.")
+    ] = False,
+) -> None:
+    import re
+
+    dirs = runs or sorted(p for p in Path("runs").glob("ehrsql__*") if (p / "results.jsonl").exists())
+    table = ehr_markdown_table([summarize_ehr(d) for d in dirs])
+    console.print(table)
+    if readme:
+        path = Path("README.md")
+        text = path.read_text()
+        pattern = re.compile(r"(<!-- ehrsql:start -->\n)(?:.*?\n)?(<!-- ehrsql:end -->)", re.S)
+        if not pattern.search(text):
+            raise typer.BadParameter("README.md has no ehrsql markers")
+        path.write_text(pattern.sub(lambda m: m.group(1) + table + "\n" + m.group(2), text))
 
 
 if __name__ == "__main__":
