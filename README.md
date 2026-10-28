@@ -4,7 +4,9 @@
 
 An LLM agent that answers plain-English questions about a SQL database, plus the harness that
 measures how well it does. The agent is written directly on the Claude Messages API with no agent
-framework. It is tested on BIRD Mini-Dev, a public benchmark of 500 questions over 11 real databases.
+framework. It is tested on two benchmarks. BIRD Mini-Dev has 500 questions over 11 real databases.
+EHRSQL 2024 asks questions about hospital records, and about a fifth of them have no answer in the
+data, so the agent also has to know when to decline.
 
 The agent itself is small. Most of the code measures it: every configuration is run on the same
 questions, each one changes a single thing, and every accuracy comes with a confidence interval and
@@ -69,6 +71,48 @@ Several of BIRD's column description files have a trailing comma in the header r
 reader then drops the value notes, which are the part the agent needs most, for example that
 `POPLATEK MESICNE` means monthly issuance. `data.py` keeps them, and a test checks it.
 
+## EHRSQL: hospital records and knowing when to decline
+
+EHRSQL 2024 is a shared task on text-to-SQL over electronic health records
+([paper](https://arxiv.org/abs/2405.06673), [data](https://github.com/glee4810/ehrsql-2024)). The
+database is the MIMIC-IV demo: admissions, diagnoses, prescriptions, lab results, vitals and ICU
+stays for 100 patients, open to anyone. About 20% of the validation and test questions cannot be
+answered from it, for example "Whats the phone number of the dr who is taking care of patient 28447",
+and the right response is to decline.
+
+The score is the reliability score RS(c). A correct answer and a correct abstention each score 1,
+abstaining on a question that has an answer scores 0, and any wrong answer scores -c. The task's
+main metric is RS(10), so one wrong answer cancels ten right ones. Declining every question scores
+the share of unanswerable questions, about 20%, and that is the floor.
+
+The agent and tools are the ones used on BIRD. `agent_abstain` adds an `abstain` tool and tells the
+model how it is scored. `agent` has no way to decline. Running both on the same questions measures
+what the option to decline is worth
+([decision 0007](docs/decisions/0007-ehrsql.md)).
+
+<!-- ehrsql:start -->
+| Strategy | Model | Split | n | RS(0) % | RS(5) % | RS(10) % (95% CI) | Accuracy on answerable % | Unanswerable caught % | Abstentions correct % | $/question | Median latency (s) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| abstain_all | none | test | 1167 | 20.0 | 20.0 | 20.0 (17.7 to 22.2) | 0.0 | 100.0 | 20.0 | 0.0000 | 0.0 |
+| abstain_all | none | valid | 1163 | 19.9 | 19.9 | 19.9 (17.6 to 22.2) | 0.0 | 100.0 | 19.9 | 0.0000 | 0.0 |
+| oracle | none | test | 1167 | 100.0 | 100.0 | 100.0 (100.0 to 100.0) | 100.0 | 100.0 | 100.0 | 0.0000 | 0.0 |
+| oracle | none | valid | 1163 | 100.0 | 100.0 | 100.0 (100.0 to 100.0) | 100.0 | 100.0 | 100.0 | 0.0000 | 0.0 |
+<!-- ehrsql:end -->
+
+Model runs pending. The two baselines above need no API key.
+
+The gold queries use `current_time`. In SQLite that is the time of day on the machine running the
+query, for example `15:31:07`, not a date, so a gold query gives a different answer depending on when
+it runs. The official scorer swaps in `2100-12-31 23:59:00`, the end of the dataset's shifted
+timeline, before running anything. Skipping that step changes the answer to 174 of the 931
+answerable validation questions and 177 of the 934 answerable test questions. This repo applies the
+same rewrite to gold queries, graded predictions and the agent's own test queries, and the agent's
+prompt says what "now" is.
+
+`ehrsql.py` ports the official rewrite and scoring rules. On all 2,330 validation and test questions,
+with a mix of correct, abstained, wrong and broken predictions, its per-question scores are
+identical to the official scoring program's.
+
 ## Design choices
 
 Each one has a short decision record in [docs/decisions](docs/decisions/README.md).
@@ -108,6 +152,11 @@ uv run sqlagent compare runs/<run A> runs/<run B>
 uv run sqlagent show runs/<run> <question_id>     # full trace of one question
 uv run sqlagent failures runs/<run>               # CSV of wrong answers to label
 
+make ehrsql-data             # EHRSQL 2024 and the MIMIC-IV demo database (37 MB)
+make ehrsql-baselines        # oracle and always-abstain, no API key needed
+make ehrsql-smoke            # agent with the abstain tool on 20 questions
+make ehrsql                  # both agents on the same 200 validation questions
+
 uv run inspect eval evals/bird_inspect.py --model mockllm/model -T strategy=agent -T limit=20
 uv run inspect view
 ```
@@ -125,6 +174,8 @@ src/sql_agent_eval/
   report.py       tables, bootstrap intervals, McNemar test
   llm.py          Claude client with prompt caching, and a scripted fake for tests
   pricing.py      per-model token prices
+  ehrsql.py       EHRSQL loading, the official query rewrite and reliability scoring
+  ehr_runner.py   EHRSQL strategies, runs and summary table
   cli.py          `sqlagent` command
 evals/            Inspect AI task
 tests/            offline tests (no API key, no download)
@@ -139,7 +190,7 @@ docs/PLAN.md      the three-day plan
 | uv | dependency management with a lock file |
 | Ruff | linting and formatting |
 | Pyright | static type checking |
-| pytest | 32 offline tests, using a scripted model in place of the API |
+| pytest | 47 offline tests, using a scripted model in place of the API |
 | pre-commit | lint, format, tests and a secret-key check on every commit |
 | GitHub Actions | the same checks on every push and pull request |
 | sqlglot | SQL parsing for the read-only check |
@@ -147,7 +198,9 @@ docs/PLAN.md      the three-day plan
 
 ## Limitations
 
-- One benchmark, SQLite only. Results may not carry over to other databases or SQL dialects.
+- Both benchmarks are SQLite only. Results may not carry over to other databases or SQL dialects.
+- EHRSQL's test labels are public, so test scores here are not blind. Choices are made on the
+  validation split.
 - BIRD's scoring ignores row order and duplicates and can count a coincidental match as correct.
 - Model outputs are not deterministic. The plan includes repeated runs to measure the spread.
 - Some BIRD gold labels are known to contain errors. A corrected 2026 release exists and is future work.
@@ -156,4 +209,6 @@ docs/PLAN.md      the three-day plan
 
 Code: MIT. BIRD Mini-Dev is released under CC BY-SA 4.0 by its authors
 ([paper](https://arxiv.org/abs/2305.03111), [repository](https://github.com/bird-bench/mini_dev)).
-The data is downloaded by `make data` and is not stored in this repo.
+EHRSQL 2024 is CC BY 4.0 ([repository](https://github.com/glee4810/ehrsql-2024)) and the MIMIC-IV
+demo database is released under the Open Data Commons ODbL 1.0 by PhysioNet. All data is downloaded
+by `make data` and `make ehrsql-data` and is not stored in this repo.

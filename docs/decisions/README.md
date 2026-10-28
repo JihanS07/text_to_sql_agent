@@ -12,3 +12,4 @@ after the fact; a changed decision gets a new record that supersedes the old one
 | [0004](0004-scoring.md) | Score with BIRD's official set comparison and cache gold results |
 | [0005](0005-inspect.md) | Add Inspect AI as a second runner, not a replacement |
 | [0006](0006-statistics.md) | Report bootstrap confidence intervals and paired McNemar tests |
+| [0007](0007-ehrsql.md) | Add EHRSQL 2024 as a second benchmark, scored for reliability |
